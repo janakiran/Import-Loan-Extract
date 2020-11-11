@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<config
+	xmlns="http://web-harvest.sourceforge.net/schema/1.0/config"
+	scriptlang="groovy">
+
+	<robotics-flow>
+		<robot driver="universal" close-on-completion="true"
+			start-in-private="false">
+			<capability name="SEARCH_ALL_WINDOWS" value="true" />
+			<capability name="CLOSE_ALL_WINDOWS" value="false" />
+			<script><![CDATA[
+				import com.workfusion.studio.rpa.recorder.api.*
+				import com.workfusion.studio.rpa.recorder.api.types.*
+				import com.workfusion.studio.rpa.recorder.api.custom.*
+				import com.workfusion.studio.rpa.recorder.api.internal.representation.*
+
+				import com.workfusion.bot.exception.*
+			
+
+				def cc_address = "{{cc_address}}".split(",");
+
+
+				def temp_str = RString.of('')
+
+
+				def loop_count = RNumber.fromCanonical('0')
+
+
+				def outlook_app = "{{outlook_app_path}}"
+
+
+				def isoutlook_open = RBoolean.fromCanonical('false')
+
+
+				def to_address = "{{to_address}}".split(",");
+
+
+				def mail_body = null;
+				
+				StringBuffer sb = new StringBuffer();
+				sb.append("Dear All,"+System.lineSeparator());
+				sb.append(System.lineSeparator());
+				log.info("error_msg_lst.getWrappedObject() class = "+error_msg_lst.getWrappedObject().getClass().getName());
+				if(!error_msg_lst.getWrappedObject().equals("[]")){
+					sb.append("BOT has Encountered an error while processing the Monthly process."+System.lineSeparator());
+					sb.append(System.lineSeparator());
+					sb.append("Error log :"+System.lineSeparator());
+					for(String element : error_msg_lst.getWrappedObject() instanceof String ?  error_msg_lst.getWrappedObject().split(','):error_msg_lst.getWrappedObject()){
+						sb.append("--  "+element.toString()+System.lineSeparator());
+					}
+				}else{
+					sb.append("\tBOT has executed the process successfully!"+System.lineSeparator());
+				}
+				sb.append(System.lineSeparator());
+				sb.append(System.lineSeparator());
+				sb.append("Thank you & Regards,"+System.lineSeparator());
+				sb.append("rb-mu_robot_pcg_01");
+				mail_body = sb.toString()
+
+				def string_check = RBoolean.fromCanonical('false')
+
+
+				def subject_str = RString.of('ABSA:Import Loan Extract BOT run status.')
+
+
+				def semicolon = RString.of(';')
+
+
+				com.workfusion.rpa.helpers.RPA.metaClass.static.$ = { Closure c -> c.call() } // Support for Expression action. Should be implemented in RPA class in next release.
+
+
+
+				openAndFocus("${outlook_app}", 5000, 300)
+
+
+				while ((isoutlook_open) == (RBoolean.fromCanonical('false'))) {
+
+					try {
+						inDesktop {
+							switchToExistingWindow(new WindowDescriptor("rctrl_renwnd32", "Inbox - MUPCGRobot@absa.africa - Outlook", false, false).toString(), 10000)
+						}
+						isoutlook_open = RBoolean.fromCanonical("true")
+					} catch (Exception i0) {
+
+						sleep(5000)
+						loop_count = RNumber.of(${loop_count}+1)
+						if ((loop_count) == (RNumber.fromCanonical('10'))) {
+							isoutlook_open = RBoolean.fromCanonical("true")
+						} 
+					}
+				}
+				if ((isoutlook_open) == (RBoolean.fromCanonical('true'))) {
+					if ((loop_count) != (RNumber.fromCanonical('10'))) {
+						
+						inDesktop {
+							// Group of actions: Open Compose mail.
+							switchToExistingWindow(new WindowDescriptor("rctrl_renwnd32", "Inbox - MUPCGRobot@absa.africa - Outlook", false, false).toString(), 10000)
+							sendKeys(StringTransformations.getHotKeyText(104, 8))
+							sendKeys(StringTransformations.getHotKeyText(110, 0))
+							// Group of actions: Writing mail and send.
+							switchToExistingWindow(new WindowDescriptor("", "(?i).*\\QMessage\\E.*", false, true).toString(), 10000)
+							window().maximize()
+                            to_address.each( {element ->
+                                element = element.contains(";")? element : element+";"
+                                setClipboardText(element)
+                                inDesktop {
+                                    pressCtrlV()
+                                }
+
+                            })
+							pressTab()
+                            cc_address.each( {element ->
+                                element = element.contains(";")? element : element+";"
+                                setClipboardText(element)
+                                inDesktop {
+                                    pressCtrlV()
+                                }
+
+                            })
+							pressTab()
+							setClipboardText(subject_str as String)
+							pressCtrlV()
+							pressTab()
+							setClipboardText(mail_body as String)
+							pressCtrlV()
+							$("[CLASS:Button; NAME:Send]").click()
+							sleep(5 * 1000)
+							// Group of actions: close outlook.
+							sleep(10000)
+							switchToExistingWindow(new WindowDescriptor("rctrl_renwnd32", "Inbox - MUPCGRobot@absa.africa - Outlook", false, false).toString(), 10000)
+							close()
+						}
+					} 
+				}
+			]]></script>
+		</robot>
+	</robotics-flow>
+	<export include-original-data="true">
+		
+	</export>
+
+</config>

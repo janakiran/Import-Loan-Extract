@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<config
+	xmlns="http://web-harvest.sourceforge.net/schema/1.0/config"
+	scriptlang="groovy">
+
+	<robotics-flow>
+		<robot driver="universal" close-on-completion="true"
+			start-in-private="false">
+			<capability name="SEARCH_ALL_WINDOWS" value="true" />
+			<capability name="CLOSE_ALL_WINDOWS" value="false" />
+			<script><![CDATA[
+                import com.workfusion.studio.rpa.recorder.api.*
+				import com.workfusion.studio.rpa.recorder.api.types.*
+				import com.workfusion.studio.rpa.recorder.api.custom.*
+				import com.workfusion.studio.rpa.recorder.api.internal.representation.*
+				
+				import com.workfusion.bot.exception.*
+				
+				import java.io.*
+
+				import java.util.Calendar;
+				
+				ArrayList<String> errorMsgLst = Collections.emptyList();
+				
+				def inputQueriesFolder = "{{queries_location}}"
+				def outputFolder = "{{output_location}}"
+				def teraDataAppPath = "{{teradata_app_location}}"
+				def secrectVaultName = "{{credentail_vault_name}}"
+				def mainfilepath = "{{import_loan_extract_excel_file_path}}"
+				
+				Resource.listFolder(inputQueriesFolder.toString())
+
+    			def uname = workfusion_bot_task_service_registry.get(SecretsVault.class).findEntry(secrectVaultName.toString()).map({ it.getKey() }).map({ RString.of(it) }).orElseThrow({ new SecretsVaultException("Secret Entry with alias 'TeradataCreds' not found") })//"G01187284"//
+        
+           		def pwd = workfusion_bot_task_service_registry.get(SecretsVault.class).findEntry(secrectVaultName.toString()).map({ it.getValue() }).map({ RString.of(it) }).orElseThrow({ new SecretsVaultException("Secret Entry with alias 'TeradataCreds' not found") })//"BLUE1234\$"//
+
+				List<String> sqlFilesList = Resource.listFolder(inputQueriesFolder.toString())
+				Map <String, String> outputLocationMap = [:]										
+				Iterator<String> itr = sqlFilesList.iterator();
+				try{
+					openAndFocus(teraDataAppPath, 10000, 300)
+				}catch(Exception e){
+					sendKeys("#r")
+					switchToExistingWindow(new WindowDescriptor("", "(?i).*\\QRun\\E.*", false, true).toString(), 10000)
+					sendKeys(teraDataAppPath)
+					pressEnter()
+				}
+				while(itr.hasNext()){
+					String sqlFileName = itr.next();
+					String outputFileName = new File(sqlFileName).getName().replace("sql","txt")
+					String outputFile = outputFolder+File.separator+outputFileName
+					outputLocationMap.put(outputFileName.replaceAll(".txt",""),outputFile)
+					setClipboardText(sqlFileName)
+					inDesktop{
+						switchToExistingWindow(new WindowDescriptor("", "(?i).*\\QTeradata\\E.*", false, true).toString(), 10000)
+						sendKeys("^o")
+	
+						switchToExistingWindow(new WindowDescriptor("#32770", "Open Query", false, false).toString(), 10000)
+						pressCtrlV()
+						pressEnter()
+						sleep(2000)
+						
+						switchToExistingWindow(new WindowDescriptor("", "(?i).*\\QTeradata\\E.*", false, true).toString(), 10000)
+						sendKeys("{F5}")
+						sleep(1000)
+						try{
+							switchToExistingWindow(new WindowDescriptor("", "(?i).*\\QConnection Information\\E.*", false, true).toString(), 10000)
+							sleep(1000)
+							sendKeys("!b")
+							sendKeys("!u")
+							sendKeys(uname)
+							sendKeys("!p")
+							sendKeys(pwd)
+							sendKeys("{ENTER}")
+						}catch(Exception e){}
+						
+						switchToExistingWindow(new WindowDescriptor("", "(?i).*\\QTeradata\\E.*", false, true).toString(), 10000)
+						int loop = 0;
+						while(loop < 10){
+							try{
+								$('[class="WindowsForms10.Window.8.app.0.bb8560_r12_ad1"][name="AnswerFrm"]').click()
+								break;
+							}catch(Exception e){
+								log.info("loop count = "+ loop)
+								sleep(10 * 1000)
+								loop++;
+							}
+						}
+						log.info("Query to execution completed and stated downloading xlsx file!")
+						setClipboardText(outputFile)
+						try{
+							switchToExistingWindow(new WindowDescriptor("", "(?i).*\\QTeradata\\E.*", false, true).toString(), 10000)
+							sendKeys("!f")
+							sendKeys("a")
+							switchToExistingWindow(new WindowDescriptor("#32770", "(?i).*\\QSave\\E.*", true, true).toString(), 10000)
+							sendKeys("!n")
+							pressCtrlV()
+							sendKeys("!t")
+							actions().clickAndHold($("[CLASS:ComboBox; NAME:FileTypeControlHost]")).build().perform()
+							sendKeys("t")
+							sendKeys("{DOWN 2}")
+							pressTab()
+							sendKeys("!s")
+							sleep(5000)
+						}catch(Exception e){
+							log.error("Error in teradata step : "+e.getMessage());
+							errorMsgLst.add("Error in teradata step : "+e.getMessage());
+						}
+					}
+				
+				}
+				
+				inDesktop{
+					switchToExistingWindow(new WindowDescriptor("", "(?i).*\\QTeradata\\E.*", false, true).toString(), 10000)
+					sleep(10000)
+					close()
+					try{
+						sleep(1000)
+						switchToExistingWindow(new WindowDescriptor("", "(?i).*\\Qstill connected\\E.*", false, true).toString(), 10000)
+						$(".Button[text='Yes']").click()
+					}catch(Exception e){}
+				}
+				boolean isErrorOccured = false;
+				putAt("error_msg_lst", errorMsgLst)
+                if(!errorMsgLst.isEmpty()){
+					isErrorOccured = true;
+				}
+				putAt("iserror_occured", isErrorOccured)
+				sys.defineVariable("output_files_map", outputLocationMap)
+            ]]></script>
+		</robot>
+	</robotics-flow>
+	<export include-original-data="true">
+		<single-column name="error_msg_lst" value="${error_msg_lst}" />
+      	<single-column name="iserror_occured" value="${iserror_occured}" />
+      	<single-column name="output_files_map" value="${output_files_map}" />
+      	<single-column name="mainfilepath" value="${mainfilepath}" />
+	</export>
+
+</config>

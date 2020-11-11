@@ -1,0 +1,394 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<config xmlns="http://web-harvest.sourceforge.net/schema/1.0/config" scriptlang="groovy">
+
+	<script>
+		<![CDATA[
+			import org.apache.poi.ss.usermodel.Cell;
+			import org.apache.poi.ss.usermodel.Row;
+			import org.apache.poi.hssf.usermodel.HSSFSheet;
+			import org.apache.poi.hssf.usermodel.HSSFDateUtil;
+			import org.apache.poi.hssf.usermodel.HSSFWorkbook;
+			import org.apache.poi.hssf.usermodel.HSSFFormulaEvaluator;
+			import org.apache.poi.hssf.usermodel.HSSFCellStyle;
+			import org.apache.poi.hssf.usermodel.HSSFDateUtil;
+			import org.apache.poi.ss.usermodel.FillPatternType
+			import org.apache.poi.ss.usermodel.*; 
+			import java.nio.file.Paths;
+			import java.nio.file.Path;
+			import java.nio.file.Files;
+			import java.nio.charset.Charset
+			import org.apache.poi.ss.usermodel.DataFormatter;
+			import org.apache.poi.ss.usermodel.FormulaEvaluator;
+			import java.text.SimpleDateFormat;
+			import org.apache.poi.hssf.util.HSSFColor;
+			import org.apache.poi.hssf.usermodel.HSSFDataFormat;
+			import com.workfusion.studio.rpa.recorder.api.*
+            import com.workfusion.studio.rpa.recorder.api.types.*
+            import com.workfusion.studio.rpa.recorder.api.custom.*
+            import com.workfusion.studio.rpa.recorder.api.internal.representation.*
+			
+            import com.workfusion.bot.exception.*
+			
+			// Variables declarations.
+			File file_cust_bal, file_Transactions, file_Standing_orders, file_import_loan_extract;
+			boolean is_file_cust_bal_exist, is_file_Transactions_exist, is_file_Standing_orders_exist;
+			ArrayList<String> error_msg_lst = Collections.emptyList();
+			//Map filesMap = stringToMap(output_files_map.toString())
+			file_cust_bal = new File(cutomer_balance_filepath.toString())
+			file_Transactions = new File(cutomer_balance_filepath.toString())
+			file_Standing_orders = new File(standingorders_filepath.toString())
+			file_import_loan_extract = new File(mainfilepath.toString())
+			
+			is_file_cust_bal_exist = file_cust_bal.exists()
+			is_file_Transactions_exist = file_Transactions.exists()
+			is_file_Standing_orders_exist = file_Standing_orders.exists()
+			is_file_import_loan_extract_exist = file_import_loan_extract.exists()
+			excelCredsVaultName = "{{excel_password_vault}}"
+			String password = workfusion_bot_task_service_registry.get(SecretsVault.class).findEntry(excelCredsVaultName).map({ it.getKey() }).map({ RString.of(it) }).orElseThrow({ new SecretsVaultException("Secret Entry with alias '${excelCredsVaultName}' not found") })
+			
+			if(is_file_cust_bal_exist && is_file_Transactions_exist && is_file_Standing_orders_exist && is_file_import_loan_extract_exist){
+				Path path_cust_bal = Paths.get(cutomer_balance_filepath.toString());
+				Path path_Transactions = Paths.get(transactions_filepath.toString());
+				Path path_Standing_orders = Paths.get(standingorders_filepath.toString());
+				
+				String importLoanExcel = mainfilepath.toString();
+				
+				int[] amtNumTypeColumns_cust_bal = Arrays.asList(5);
+				int[] amtNumTypeColumns_Transactions = Arrays.asList(8);
+				int[] amtNumTypeColumns_Standing_orders = Arrays.asList(6);
+
+				int[] numTypeColumns_cust_bal = Arrays.asList(1,2,3);
+				int[] numTypeColumns_Transactions = Arrays.asList(1,2,3,5);
+				int[] numTypeColumns_Standing_orders = Arrays.asList(0,1,2,4,5);
+
+				int[] dateTypeColumns_cust_bal = Arrays.asList(0);
+				int[] dateTypeColumns_Transactions = Arrays.asList(0);
+				int[] dateTypeColumns_Standing_orders = Arrays.asList(7);
+				String dateFormat = "{{date_format}}"//"yyyy/MM/dd"
+  				String deLimiter = "{{delimiter}}"//"\\t"
+				
+				
+				String[] sheetNameToWrite = Arrays.asList("Balance","Transaction","S Order");
+				
+				log.info ("Location of import loan extract file : "+importLoanExcel)
+				
+				// printing start of process string to console.	
+				
+				//=============================================================================================
+				
+				Map<String,Boolean> sheetSuccessRun = new HashMap();
+				// calling readTextFile method to read input text file.
+				List<String> input_data_cust_bal = readTextFile(path_cust_bal,deLimiter);
+				List<String> input_data_Transactions = readTextFile(path_Transactions,deLimiter);
+				List<String> input_data_Standing_orders = readTextFile(path_Standing_orders,deLimiter);
+				
+				for(int i = 0; i < 3; i++){
+					ArrayList<String> input_data = Collections.emptyList();
+					
+					log.info("|--> Started writing customer balance to '"+sheetNameToWrite[i]+"' sheet in import loans excel.")
+					
+					switch(sheetNameToWrite[i]){
+					
+						case "Balance":
+							numTypeColumns = numTypeColumns_cust_bal;
+							amtNumTypeColumns = amtNumTypeColumns_cust_bal;
+							dateTypeColumns = dateTypeColumns_cust_bal;
+							input_data.addAll(input_data_cust_bal);
+							break;
+						case "Transaction":
+							numTypeColumns = numTypeColumns_Transactions;
+							amtNumTypeColumns = amtNumTypeColumns_Transactions;
+							dateTypeColumns = dateTypeColumns_Transactions;
+							input_data.addAll(input_data_Transactions);
+							break;
+						case "S Order":
+							numTypeColumns = numTypeColumns_Standing_orders;
+							amtNumTypeColumns = amtNumTypeColumns_Standing_orders;
+							dateTypeColumns = dateTypeColumns_Standing_orders;
+							input_data.addAll(input_data_Standing_orders);
+							break;
+					}
+	
+					boolean isWriteCompleted = writeDataToSheet(importLoanExcel,input_data, sheetNameToWrite[i], amtNumTypeColumns,dateTypeColumns,numTypeColumns,dateFormat, password);
+					
+					if(isWriteCompleted){
+						log.info("|--> Writing data to '"+sheetNameToWrite[i]+"' completed successfully!!");
+					}else{
+						log.info("|--> Writing data to '"+sheetNameToWrite[i]+"' failed. Please check log for detail.");
+						error_msg_lst.add("Writing data to '"+sheetNameToWrite[i]+"' failed. Please check log for detail.");
+					}
+					
+					switch(sheetNameToWrite[i]){
+					
+						case "Balance":
+							sheetSuccessRun.put("balance", isWriteCompleted) ;
+							break;
+						case "Transaction":
+							sheetSuccessRun.put("transaction", isWriteCompleted) ;
+							break;
+						case "S Order":
+							sheetSuccessRun.put("standard_order", isWriteCompleted) ;
+							break;
+						}
+				}
+				reevaulateFormulas(importLoanExcel,input_data_Standing_orders, "S Order", password)
+				reevaulateFormulas(importLoanExcel,input_data_Transactions, "Transaction", password)
+				reevaulateFormulas(importLoanExcel,input_data_cust_bal, "Balance", password)
+				testFormula(importLoanExcel,input_data_Transactions, "Transaction", password)
+				
+				input_data_cust_bal.clear();
+				input_data_Transactions.clear();
+				input_data_Standing_orders.clear();
+				putAt("error_msg_lst",error_msg_lst);
+				putAt("excel_creds_vault_name",excelCredsVaultName);
+			}
+			
+			
+			
+			
+			//================	Method Declarations - START ==================
+			
+			/**
+			*	Read data frpm text/CSV(Single de-limiter) file and returns the data to a List variable.
+			*
+			*	@param textFilePath		Path instance of text file path.
+			*	@param delimiter 		delimiter used to identify each column.
+			*	@return List 			returns data from the text file in a nested array list of 2-layer.
+			*	@exception IOException 	thorws IOException.
+			*	@see IOException
+			*/
+			
+			public List readTextFile(Path textFilePath, String delimiter) throws IOException{
+			
+				List<String> dataLst = new ArrayList<>();
+			
+				BufferedReader bfReader = Files.newBufferedReader(textFilePath, Charset.forName("UTF-8"))
+				
+				String currentLine = null;		
+				int loop = 1;
+				while((currentLine = bfReader.readLine()) != null){
+					dataLst.add(currentLine.split(delimiter).toList());
+					
+				}
+				
+				return dataLst;
+			}
+			
+			/**
+			*	Inserts data from the list variable to a already existing sheet in an excel.
+			*
+			*	@param xlsFilePath	xls file path.
+			*	@param dataToWrite 	List type data to be written.
+			*	@param sheetName 	sheet name to write the data.
+			*	@param columnToNum 	array of column numbers where data is in number format (0 - base index )
+			*	@return boolean 	returns status of the method(ex: returns false when exception occured during execution)
+			*						need to see the log incase of false.
+			*	
+			*/
+			public boolean writeDataToSheet(String xlsFilePath,List<String> dataToWrite ,String sheetName,int[] amtNumTypeColumns,int[] columnToDate,int[] numTypeColumns,String dateFormat,String password){
+			
+				try{
+					FileInputStream fis = new FileInputStream(xlsFilePath);
+					Workbook wb = WorkbookFactory.create(fis,password);
+					Sheet sh = wb.getSheet(sheetName);
+					CellStyle cellStyle_num = wb.createCellStyle();
+					CellStyle cellStyle_dt = wb.createCellStyle();
+					int lastRowNum =  sh.getLastRowNum()
+                    for(int i = 1; i <= lastRowNum; i++){
+						try{
+							 sh.removeRow(sh.getRow(i))
+						}catch(Exception e){}
+                    }
+					for(int i = 1; i < dataToWrite.size(); i++){
+						
+						Row row = sh.createRow(i);
+                        for(int j = 0; j < dataToWrite[i].size(); j++){
+                          Cell cell = row.createCell(j)
+
+                          String cellValue = dataToWrite[i][j];
+
+                          if(amtNumTypeColumns.contains(j)){
+                           cell.setCellValue(Double.parseDouble(cellValue.replace(',','')));
+						   cellStyle_num.setDataFormat(HSSFDataFormat.getBuiltinFormat("#,##0.00"));
+						   cell.setCellStyle(cellStyle_num)
+                          }else if(numTypeColumns.contains(j)){
+                           cell.setCellValue(Double.parseDouble(cellValue.replace(',','')));
+                          }else if(columnToDate.contains(j)){
+                           try{
+                            cell.setCellValue(new SimpleDateFormat(dateFormat).parse(cellValue));
+							cellStyle_dt.setDataFormat((short) 14);
+                            cell.setCellStyle(cellStyle_dt);
+                           }catch(IllegalArgumentException e){
+                            log.error("Error message = "+e.getMessage() +" & value is "+cellValue)
+                            cell.setCellValue(cellValue);
+                           }
+                          }else{
+                           cell.setCellValue(cellValue);
+                          }
+                         }
+						
+					}
+					fis.close()
+					FileOutputStream fos = new FileOutputStream(xlsFilePath);
+					wb.write(fos);
+					wb.close();
+					fos.close();
+					return true;
+					
+				}catch(Exception e){
+					log.error("Exception Message : "+e.getMessage())
+					return false;
+				}
+				
+			}
+			
+			/**
+			*	Inserts formulae based on sheet name of an excel.
+			*
+			*	@param xlsFilePath	xls file path.
+			*	@param dataToWrite 	List type data to be written.
+			*	@param sheetName 	sheet name to write the data.
+			*	@return boolean 	returns status of the method(ex: returns false when exception occured during execution)
+			*						need to see the log incase of false.
+			*	
+			*/
+			public boolean reevaulateFormulas(String xlsFilePath,List<String> dataToWrite ,String sheetName,String password){
+			
+				try{
+				
+					FileInputStream fis = new FileInputStream(xlsFilePath);
+					Workbook wb = WorkbookFactory.create(fis,password);
+					HSSFSheet sh = wb.getSheet(sheetName);
+					CellStyle cellStyle = wb.createCellStyle();
+					cellStyle.setDataFormat((short) 14);
+					for(int i = 1; i < dataToWrite.size(); i++){
+						Row row = sh.getRow(i);
+						switch(sheetName){
+						
+							case "Balance":
+								Cell cell_formula = row.createCell(6);
+								cell_formula.setCellFormula("VLOOKUP(C"+(i+1)+",RECONCILIATION!B:C,2,0)");
+								break;
+							case "Transaction":
+								Cell cell_formula_j = row.createCell(dataToWrite[i].size());
+								cell_formula_j.setCellFormula("I"+(i+1)+"*-1");
+								Cell cell_formula_k = row.createCell(dataToWrite[i].size()+1);
+								cell_formula_k.setCellFormula("IF(I"+(i+1)+">0,I"+(i+1)+",-I"+(i+1)+")");
+								Cell cell_formula_l = row.createCell(dataToWrite[i].size()+2);
+								cell_formula_l.setCellFormula("B"+(i+1)+"&C"+(i+1)+"&K"+(i+1));
+								Cell cell_formula_m = row.createCell(dataToWrite[i].size()+3);
+								cell_formula_m.setCellFormula("A"+(i+1));
+								cell_formula_m.setCellStyle(cellStyle)
+								Cell cell_formula_n = row.createCell(dataToWrite[i].size()+4);
+								cell_formula_n.setCellFormula("G"+(i+1));
+								Cell cell_formula_o = row.createCell(dataToWrite[i].size()+5);
+								cell_formula_o.setCellFormula("J"+(i+1));
+								Cell cell_formula_q = row.createCell(dataToWrite[i].size()+6);
+								String formulaInner = "VLOOKUP(L"+(i+1)+",'S Order'!I:J,2,0)";
+								cell_formula_q.setCellStyle(cellStyle)
+								cell_formula_q.setCellFormula(formulaInner);
+								break;
+							case "S Order":
+								Cell cell_formula_i = row.createCell(dataToWrite[i].size());
+								cell_formula_i.setCellFormula("A"+(i+1)+"&B"+(i+1)+"&G"+(i+1));
+								Cell cell_formula_j = row.createCell(dataToWrite[i].size()+1);
+								cell_formula_j.setCellFormula("H"+(i+1));
+								cell_formula_j.setCellStyle(cellStyle)
+								break;
+						}
+					}
+					fis.close();
+					FileOutputStream fos = new FileOutputStream(xlsFilePath);
+					wb.write(fos);
+					wb.close();
+					fos.close();
+					return true;
+				
+				}catch(Exception e){
+					log.error("Exception Message : "+e.getMessage())
+					e.printStackTrace()
+					return false;
+				}
+				
+			}
+			
+			/**
+			*	Reevaulate the formula in sheet "Transaction" formulae only .
+			*
+			*	@param xlsFilePath	xls file path.
+			*	@param dataToWrite 	List type data to be written.
+			*	@param sheetName 	sheet name to write the data.
+			*	@return boolean 	returns status of the method(ex: returns false when exception occured during execution)
+			*						need to see the log incase of false.
+			*	
+			*/
+			public boolean testFormula(String xlsFilePath,List<String> dataToWrite ,String sheetName, String password){
+				try{
+				
+					FileInputStream fis = new FileInputStream(xlsFilePath);
+					Workbook wb = WorkbookFactory.create(fis, password);
+					HSSFSheet sh = wb.getSheet(sheetName);
+					HSSFCellStyle style = wb.createCellStyle();
+					HSSFFormulaEvaluator.evaluateAllFormulaCells(wb);
+					FormulaEvaluator eval = wb.getCreationHelper().createFormulaEvaluator();
+					CellStyle cellStyle = wb.createCellStyle();
+					cellStyle.setDataFormat((short) 14);
+					for(int i = 1; i < dataToWrite.size(); i++){
+						Row row = sh.getRow(i);
+						if(sheetName.equals("Transaction")){
+							Cell cell_formula_p = row.getCell(dataToWrite[i].size()+6);
+							if(eval.evaluateInCell(cell_formula_p).getCellType() == 5){
+								style.setFillForegroundColor ( HSSFColor.LIGHT_YELLOW.index );
+   								style.setFillPattern ( FillPatternType.SOLID_FOREGROUND );
+								cell_formula_p.setCellStyle(style)
+								cell_formula_p.setCellValue("STO NOT FOUND")
+							}else{
+								cell_formula_p.setCellStyle(cellStyle)
+							}
+						}else{
+							log.error("Invalid sheet!")
+							return false;
+						}
+					}
+					fis.close();
+					FileOutputStream fos = new FileOutputStream(xlsFilePath);
+					wb.write(fos);
+					wb.close();
+					fos.close();
+					return true;
+				
+				}catch(Exception e){
+					log.error("Exception Message : "+e.getMessage())
+					return false;
+				}
+			}
+			
+			/**
+			*	Converting map in string format to Map.
+			*
+			*	@param str			map in string format.
+			*	@return Map		 	returns converted map.
+			*	
+			*/
+			public Map stringToMap(String str){
+                Map tempMap;
+                if(str.contains("=")){
+                    tempMap = new HashMap();
+                    for(String strTemp: str.replaceAll("[{|}|\\[|\\]]","").split(",")){
+                        def lst = strTemp.split("=")
+                        tempMap.put(lst[0].trim(),lst[1].trim())
+                    }
+                    return tempMap
+                }else{
+                    return null;
+                }	
+            }
+			//================	Method Declarations - END ==================
+		]]>
+	</script>
+    <export include-original-data="true">
+    	<single-column name="error_msg_lst" value="${error_msg_lst}" />
+      	<single-column name="excel_creds_vault_name" value="${excel_creds_vault_name}" />
+    </export>
+	
+</config>

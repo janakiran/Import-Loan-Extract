@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<config xmlns="http://web-harvest.sourceforge.net/schema/1.0/config" scriptlang="groovy">
+
+	<script><![CDATA[ 
+		import org.apache.poi.ss.usermodel.Cell;
+		import org.apache.poi.ss.usermodel.Row;
+		import org.apache.poi.hssf.usermodel.HSSFSheet;
+		import org.apache.poi.hssf.usermodel.HSSFDateUtil;
+		import org.apache.poi.hssf.usermodel.HSSFWorkbook;
+		import org.apache.poi.hssf.usermodel.HSSFFormulaEvaluator;
+		import org.apache.poi.hssf.usermodel.HSSFCellStyle;
+		import org.apache.poi.hssf.usermodel.HSSFDateUtil;
+		import org.apache.poi.ss.usermodel.FillPatternType
+		import org.apache.poi.ss.usermodel.*; 
+		import java.nio.file.Paths;
+		import java.nio.file.Path;
+		import java.nio.file.Files;
+		import java.nio.charset.Charset
+		import org.apache.poi.ss.usermodel.DataFormatter;
+		import org.apache.poi.ss.usermodel.FormulaEvaluator;
+		import java.text.SimpleDateFormat;
+		import org.apache.poi.hssf.util.HSSFColor;
+		import com.workfusion.studio.rpa.recorder.api.*
+        import com.workfusion.studio.rpa.recorder.api.types.*
+        import com.workfusion.studio.rpa.recorder.api.custom.*
+        import com.workfusion.studio.rpa.recorder.api.internal.representation.*
+
+        import com.workfusion.bot.exception.*
+		
+		String importLoanExcel = mainfilepath.toString();
+		String password = workfusion_bot_task_service_registry.get(SecretsVault.class).findEntry(excel_creds_vault_name.toString()).map({ it.getKey() }).map({ RString.of(it) }).orElseThrow({ new SecretsVaultException("Secret Entry with alias '${excel_creds_vault_name.toString()}' not found") })
+		Iterator itrMap = toMapWithValueAsArray(rm_data.getWrappedObject()).entrySet().iterator();
+		List tempLst = new ArrayList();
+		while(itrMap.hasNext()){
+			Map.Entry entry = itrMap.next();
+			
+			tempLst.add(Arrays.asList("", "", "", "", "", "", "","", "", ""))
+			tempLst.add(Arrays.asList(entry.getValue()[1], entry.getKey(), "", "", "", "", "",entry.getValue()[0], "", ""))
+			tempLst.add(Arrays.asList("", "", "", "", "", "", "","", "", ""))
+			tempLst.add(Arrays.asList("", "", "", "", "", "", "","TOTAL", "", ""))
+			tempLst.add(Arrays.asList("", "", "", "", "", "", "","FOS", "", ""))
+			tempLst.add(Arrays.asList("", "", "", "", "", "", "","DIFF", "", ""))
+			tempLst.add(Arrays.asList("", "", "", "", "", "", "","", "", ""))
+			
+			
+		}
+		
+		writeToExcel(importLoanExcel,"RECONCILIATION",tempLst,password);
+		//================	Method Declarations - START ==================
+		
+		
+		/**
+		*	Converts map in string format to map
+		*
+		*	@param str			input string
+		*	@return HasMap		returns Map.
+		*	
+		*/
+		public Map toMapWithValueAsArray(String str){
+			Map tempMap;
+			if(str.contains("=")){
+				tempMap = new HashMap();
+				String str1 = str.replaceAll("[{|}]","")
+				for(String strTemp: str.replaceAll("[{|}]","").replaceAll("],","]~").split("~")){
+					def lst = strTemp.split("=")
+					tempMap.put(lst[0].trim(),lst[1].replaceAll("[\\[|\\]]","").split(","))
+				}
+				return tempMap
+			}else{
+				return null;
+			}	
+		}
+		
+		/**
+		*	writes the input list data to excel and returns execution status of the method.
+		*
+		*	@param excelFilePath	file path of the excel file to write.
+		*	@param sheetNameToWrite	name of the sheet to write.
+		*	@param dataLst			input data in 2-layer format.
+		*	@param hasHeader		set true if the input list contains header else false.
+		*	@return boolean			returns execution status of the method.
+		*	
+		*/
+		public boolean writeToExcel(String excelFilePath, String sheetNameToWrite, List dataLst, String password){
+			try{
+				FileInputStream fis = new FileInputStream(new File(excelFilePath));
+				Workbook wb = WorkbookFactory.create(fis, password);
+				Sheet sh = wb.getSheet(sheetNameToWrite);
+				
+				CellStyle styleHeader = wb.createCellStyle();
+				styleHeader.setBorderBottom(BorderStyle.THIN);
+				styleHeader.setBorderLeft(BorderStyle.THIN);
+				styleHeader.setBorderRight(BorderStyle.THIN);
+				styleHeader.setBorderTop(BorderStyle.THIN);
+				styleHeader.setAlignment(HorizontalAlignment.CENTER);
+				styleHeader.setFillForegroundColor(IndexedColors.INDIGO.getIndex());
+				
+				Font font = wb.createFont();
+		        font.setColor(HSSFColor.HSSFColorPredefined.WHITE.getIndex());
+		        styleHeader.setFont(font);
+		        
+				styleHeader.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+				
+				CellStyle style = wb.createCellStyle();
+				style.setBorderBottom(BorderStyle.THIN);
+				style.setBorderLeft(BorderStyle.THIN);
+				style.setBorderRight(BorderStyle.THIN);
+				style.setBorderTop(BorderStyle.THIN);
+				style.setAlignment(HorizontalAlignment.CENTER);
+				int lastRowNum = sh.getLastRowNum()+1
+				int loop = 0;
+				for(int i = lastRowNum; i < dataLst.size()+lastRowNum; i++){
+					Row row = sh.createRow(i);
+					for(int j = 0; j < dataLst[loop].size(); j++){
+						Cell cell = row.createCell(j)
+						if(dataLst[loop][1] != ""){
+							cell.setCellStyle(styleHeader);
+							row.createCell(10).setCellStyle(styleHeader);
+							switch(j){
+							case 0:
+								cell.setCellValue(dataLst[loop][0]);
+								break;
+							case 1:
+								cell.setCellValue(Double.parseDouble(dataLst[loop][1].toString()));
+								break;
+							case 7:
+								cell.setCellValue(dataLst[loop][7]);
+								break;
+							}
+						}else{
+							cell.setCellStyle(style);
+							row.createCell(10).setCellStyle(style);
+							if(j == 7){
+								cell.setCellValue(dataLst[loop][7]);
+							}
+						}
+					}
+					loop++;
+				}
+				
+				fis.close();
+				FileOutputStream fos = new FileOutputStream(new File(excelFilePath));
+				wb.write(fos);
+				wb.close();
+				fos.close();
+				return true;
+			}catch(Exception e){
+				log.error("Error in writeToExcel method and the error message is : "+e.getMessage());
+				return false
+			}
+		}
+	]]></script>
+    <export include-original-data="true"></export>
+
+</config>

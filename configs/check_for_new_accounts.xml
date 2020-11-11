@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<config xmlns="http://web-harvest.sourceforge.net/schema/1.0/config" scriptlang="groovy">
+
+	<script><![CDATA[ 
+		import org.apache.poi.ss.usermodel.Cell;
+		import org.apache.poi.ss.usermodel.Row;
+		import org.apache.poi.hssf.usermodel.HSSFSheet;
+		import org.apache.poi.hssf.usermodel.HSSFDateUtil;
+		import org.apache.poi.hssf.usermodel.HSSFWorkbook;
+		import org.apache.poi.hssf.usermodel.HSSFFormulaEvaluator;
+		import org.apache.poi.hssf.usermodel.HSSFCellStyle;
+		import org.apache.poi.hssf.usermodel.HSSFDateUtil;
+		import org.apache.poi.ss.usermodel.FillPatternType
+		import org.apache.poi.ss.usermodel.*; 
+		import java.nio.file.Paths;
+		import java.nio.file.Path;
+		import java.nio.file.Files;
+		import java.nio.charset.Charset
+		import org.apache.poi.ss.usermodel.DataFormatter;
+		import org.apache.poi.ss.usermodel.FormulaEvaluator;
+		import java.text.SimpleDateFormat;
+		import org.apache.poi.hssf.util.HSSFColor;
+		import com.workfusion.studio.rpa.recorder.api.*
+        import com.workfusion.studio.rpa.recorder.api.types.*
+        import com.workfusion.studio.rpa.recorder.api.custom.*
+        import com.workfusion.studio.rpa.recorder.api.internal.representation.*
+
+        import com.workfusion.bot.exception.*
+		
+		String importLoanExcel = mainfilepath.toString();
+		String password = workfusion_bot_task_service_registry.get(SecretsVault.class).findEntry(excel_creds_vault_name.toString()).map({ it.getKey() }).map({ RString.of(it) }).orElseThrow({ new SecretsVaultException("Secret Entry with alias '${excel_creds_vault_name.toString()}' not found") })
+		List<List> datalst_Balance = readXlsSheet(importLoanExcel,"Balance", password);
+		List<List> dataLst_RECONCILIATION = readXlsSheet(importLoanExcel,"RECONCILIATION", password);
+		
+		Map<?,?> mapResult = new HashMap();
+		List<String> lst_RECONCILIATION_filtered = new ArrayList<>();
+		
+		dataLst_RECONCILIATION.findAll{it[1] != ""}.each{lst_RECONCILIATION_filtered.add(it[1])}
+		datalst_Balance.each{e->
+			if(!lst_RECONCILIATION_filtered.contains(e[2]))
+				mapResult.put(e[2], e[4]);
+		}
+		log.info("mapResult : "+mapResult.toString())
+		boolean is_records_empty = mapResult.size ==0? true: false;
+		putAt("is_records_empty", is_records_empty)
+		putAt("records",mapResult)
+		
+					//================	Method Declarations - START ==================
+		/**
+		*	Read excel sheet and return the data in newsted ArrayList variable
+		*
+		*	@param xlsFilePath	xls file path.
+		*	@param sheetName Name of the sheet to read.
+		*	@return List 	returns status of the method(ex: returns false when exception occured during execution)
+		*						need to see the log incase of false.
+		*	
+		*/
+		public List readXlsSheet(String xlsFilePath, String sheetName, String password){
+			FileInputStream fis = new FileInputStream(xlsFilePath);
+			
+			try{
+				Workbook wb = WorkbookFactory.create(fis, password);;
+				HSSFSheet sh = wb.getSheet(sheetName);//"RECONCILIATION"
+				HSSFCellStyle style = wb.createCellStyle();
+				HSSFFormulaEvaluator.evaluateAllFormulaCells(wb);
+				FormulaEvaluator evaluator = wb.getCreationHelper().createFormulaEvaluator(); 
+				List dataLst = new ArrayList();
+				List<Integer> numList = new ArrayList();
+				int acc_no = 0;
+				
+				for(int i = 1; i < sh.getLastRowNum(); i++){
+					Row row = sh.getRow(i);
+					List rowDataLst = new ArrayList();
+					for(int j = 0; row != null&&(j < row.getLastCellNum()); j++){
+						Cell cell = row.getCell(j);
+						switch(cell.getCellTypeEnum()){
+							case CellType.BLANK:
+					            	rowDataLst.add("");
+					            break;
+					        case CellType.NUMERIC:
+					             
+					             if(HSSFDateUtil.isCellDateFormatted(cell)){
+					             	rowDataLst.add(new SimpleDateFormat("dd/MM/yyyy").format(cell.getDateCellValue()));
+					             }else{
+					             	rowDataLst.add(cell.getNumericCellValue());
+					             }
+					            break;
+					        case CellType.STRING:
+					             rowDataLst.add(cell.getStringCellValue());
+					             
+					            break;
+					        case CellType.FORMULA:
+					            switch (evaluator.evaluateFormulaCell(cell)) {
+							        case 0:
+							        	if(HSSFDateUtil.isCellDateFormatted(cell)){
+							        		rowDataLst.add(cell.getDateCellValue());
+							        	}else{
+							        		rowDataLst.add(cell.getNumericCellValue());
+							        	}
+							             
+							            break;
+							        case CellType.STRING:
+							             rowDataLst.add(cell.getStringCellValue());
+							            break;
+							    }
+					            break;
+						}
+					}
+					dataLst.add(rowDataLst)
+				}
+				
+				return dataLst
+			
+			}catch(Exception e){
+				log.error("Exception while reading sheet : "+e.getMessage())
+				return Collections.emptyList();;
+			}finally{
+				fis.close();
+			}
+		}
+		/**
+		*	Converts string to arraylist
+		*
+		*	@param str	input arraylist in string format.
+		*	@return ArrayList 	returns arraylist.
+		*	
+		*/
+		public ArrayList stringtoArrayList(String str){
+            ArrayList tempList = new ArrayList();
+            if(str!= null){
+                tempMap = new HashMap();
+                for(String strTemp: str.replaceAll("[\\[|\\]]","").split(",")){
+                    tempList.add(strTemp.trim())
+                }
+                return tempList
+            }else{
+                return null;
+            }	
+        }
+		
+	]]></script>
+    <export include-original-data="true">
+    	<single-column name="records" value="${records}"/>
+      	<single-column name="is_records_empty" value="${is_records_empty}"/>
+    </export>
+
+</config>

@@ -1,0 +1,339 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<config xmlns="http://web-harvest.sourceforge.net/schema/1.0/config" scriptlang="groovy">
+
+	<script><![CDATA[ 
+		import org.apache.poi.ss.usermodel.Cell;
+		import org.apache.poi.ss.usermodel.Row;
+		import org.apache.poi.hssf.usermodel.HSSFSheet;
+		import org.apache.poi.hssf.usermodel.HSSFDateUtil;
+		import org.apache.poi.hssf.usermodel.HSSFWorkbook;
+		import org.apache.poi.hssf.usermodel.HSSFFormulaEvaluator;
+		import org.apache.poi.hssf.usermodel.HSSFCellStyle;
+		import org.apache.poi.hssf.usermodel.HSSFDateUtil;
+		import org.apache.poi.ss.usermodel.FillPatternType
+		import org.apache.poi.ss.usermodel.*; 
+		import java.nio.file.Paths;
+		import java.nio.file.Path;
+		import java.nio.file.Files;
+		import java.nio.charset.Charset
+		import org.apache.poi.ss.usermodel.DataFormatter;
+		import org.apache.poi.ss.usermodel.FormulaEvaluator;
+		import java.text.SimpleDateFormat;
+		import org.apache.poi.hssf.util.HSSFColor;		
+		import com.workfusion.studio.rpa.recorder.api.*
+        import com.workfusion.studio.rpa.recorder.api.types.*
+        import com.workfusion.studio.rpa.recorder.api.custom.*
+        import com.workfusion.studio.rpa.recorder.api.internal.representation.*
+
+        import com.workfusion.bot.exception.*
+		
+		String importLoanExcel = mainfilepath.toString();
+		String password = workfusion_bot_task_service_registry.get(SecretsVault.class).findEntry(excel_creds_vault_name.toString()).map({ it.getKey() }).map({ RString.of(it) }).orElseThrow({ new SecretsVaultException("Secret Entry with alias '${excel_creds_vault_name.toString()}' not found") })
+		List<List> dataLst = readXlsSheet(importLoanExcel,"RECONCILIATION", password);
+		log.info("dataLst size before adding records : "+dataLst.size())
+		ArrayList<List>  testLst = new ArrayList();
+		List<List> datalst_Transactions = readXlsSheet(importLoanExcel,"Transaction", password)
+		for(int i = 0; i < dataLst.size(); i++){
+			if(dataLst[i][0]!= ""){
+				
+				testLst.addAll(filterCSVFile(dataLst[i][1].toString(), datalst_Transactions, 2))
+				for(int j = 0; j < testLst.size(); j++){
+					dataLst.add(i+1+j,testLst[j])
+				}
+				testLst.clear();
+			}
+		}
+		
+		log.info("dataLst size after adding records : "+dataLst.size())
+		writeToExcel(importLoanExcel,"RECONCILIATION",dataLst,false, password);
+		generateConditionalFormatting(importLoanExcel,"RECONCILIATION", password);
+		dataLst.clear();
+		datalst_Transactions.clear();
+		testLst.clear();
+		
+		//===================	Method Declarations - START ==================
+		/**
+		*	Read excel sheet and return the data in newsted ArrayList variable
+		*
+		*	@param xlsFilePath	xls file path.
+		*	@param sheetName Name of the sheet to read.
+		*	@return List 	returns status of the method(ex: returns false when exception occured during execution)
+		*						need to see the log incase of false.
+		*	
+		*/
+		public List readXlsSheet(String xlsFilePath, String sheetName, String password){
+			FileInputStream fis = new FileInputStream(xlsFilePath);
+			try{
+				Workbook wb = WorkbookFactory.create(fis, password);
+				HSSFSheet sh = wb.getSheet(sheetName);//"RECONCILIATION"
+				HSSFCellStyle style = wb.createCellStyle();
+				HSSFFormulaEvaluator.evaluateAllFormulaCells(wb);
+				FormulaEvaluator evaluator = wb.getCreationHelper().createFormulaEvaluator(); 
+				List dataLst = new ArrayList();
+				List<Integer> numList = new ArrayList();
+				int acc_no = 0;
+				for(int i = 1; i < sh.getLastRowNum(); i++){
+					Row row = sh.getRow(i);
+					List rowDataLst = new ArrayList();
+					for(int j = 0; j < row.getLastCellNum(); j++){
+						Cell cell = row.getCell(j);
+						
+						switch(cell.getCellTypeEnum()){
+							case CellType.BLANK:
+					            	rowDataLst.add("");
+					            break;
+					        case CellType.NUMERIC:
+					             
+					             if(HSSFDateUtil.isCellDateFormatted(cell)){
+					             	rowDataLst.add(new SimpleDateFormat("dd/MM/yyyy").format(cell.getDateCellValue()));
+					             }else{
+					             	rowDataLst.add(cell.getNumericCellValue());
+					             }
+					            break;
+					        case CellType.STRING:
+					             rowDataLst.add(cell.getStringCellValue());
+					            break;
+					        case CellType.FORMULA:
+					            switch (evaluator.evaluateFormulaCell(cell)) {
+							        case 0:
+							        	if(HSSFDateUtil.isCellDateFormatted(cell)){
+							        		rowDataLst.add(cell.getDateCellValue());
+							        	}else{
+							        		rowDataLst.add(cell.getNumericCellValue());
+							        	}
+							             
+							            break;
+							        case CellType.STRING:
+							             rowDataLst.add(cell.getStringCellValue());
+							            break;
+							    }
+					            break;
+						}
+					}
+					dataLst.add(rowDataLst)
+				}
+				
+				return dataLst
+			
+			}catch(Exception e){
+				log.error("Exception while reading sheet : "+e.getMessage())
+				return Collections.emptyList();;
+			}finally{
+				fis.close();
+			}
+		}
+		
+		/**
+		*	Searches the input list data for given account number and returns result to a List variable.
+		*
+		*	@param accNum			account number to search.
+		*	@param inputCSVDataLst 	list variable to be search.
+		*	@param col_num			Column number of account number in input list to search
+		*	@return resultLst		returns list of filtered records from search.
+		*	
+		*/
+		public List filterCSVFile(String accNum, List inputCSVDataLst, int col_num){
+			ArrayList resultLst = Collections.emptyList();
+			
+			for(int i = 0; i < inputCSVDataLst.size(); i++){
+				if (inputCSVDataLst[i][col_num] != null){
+					if(inputCSVDataLst[i][col_num].toString().equals(accNum) && inputCSVDataLst[i][7].equals("Dr")){
+						ArrayList tempLst =  Collections.emptyList();
+						
+						String strTemp = inputCSVDataLst[i][inputCSVDataLst[i].size()-1] instanceof String ? inputCSVDataLst[i][inputCSVDataLst[i].size()-1] : ""
+						if(strTemp.equals("STO NOT FOUND")){
+							tempLst.addAll(Arrays.asList("", "", "", "", "", "", new SimpleDateFormat("dd/MM/yyyy").format(new SimpleDateFormat("dd/MM/yyyy").parse(inputCSVDataLst[i][0])),inputCSVDataLst[i][6], inputCSVDataLst[i][9], inputCSVDataLst[i][inputCSVDataLst[i].size()-1]));
+						}else if(strTemp.contains("/")){
+							tempLst.addAll(Arrays.asList("", "", "", "", "", "", new SimpleDateFormat("dd/MM/yyyy").format(new SimpleDateFormat("dd/MM/yyyy").parse(inputCSVDataLst[i][0])),inputCSVDataLst[i][6], inputCSVDataLst[i][9], new SimpleDateFormat("dd/MM/yyyy").format(new SimpleDateFormat("dd/MM/yyyy").parse(strTemp))));
+						}else{
+							tempLst.addAll(Arrays.asList("", "", "", "", "", "", new SimpleDateFormat("dd/MM/yyyy").format(new SimpleDateFormat("dd/MM/yyyy").parse(inputCSVDataLst[i][0])),inputCSVDataLst[i][6], inputCSVDataLst[i][9], new SimpleDateFormat("dd/MM/yyyy").format(inputCSVDataLst[i][inputCSVDataLst[i].size()-1])));
+						}
+						
+						//inputCSVDataLst.remove(i);
+						//i -= 1;
+						resultLst.add(tempLst);
+					}
+				}
+			}
+			return resultLst;
+		}
+		/**
+		*	Generates the conditional formatting in excel.
+		*
+		*	@param excelFilePath	file path of the excel file to write.
+		*	@param sheetNameToWrite	name of the sheet to write.
+		*	@param password			excel password 
+		*	@return boolean			returns execution status of the method.
+		*	
+		*/
+		public boolean generateConditionalFormatting(String excelFilePath, String sheetNameToWrite, String password){
+			try{
+				FileInputStream fis = new FileInputStream(new File(excelFilePath))
+				Workbook wb = WorkbookFactory.create(fis,password);
+				Sheet sh = wb.getSheet(sheetNameToWrite)
+				FormulaEvaluator eval = wb.getCreationHelper().createFormulaEvaluator();
+				int lastRowNum =  sh.getLastRowNum()
+				HSSFCellStyle style = wb.createCellStyle();
+				for(int i = 1; i < lastRowNum; i++){
+					Row row = sh.getRow(i)
+						Cell cell = row.getCell(7);
+						
+						if(cell.getCellType() == 1){
+							if(cell.getStringCellValue().equals("DIFF")){
+								if (eval.evaluate(row.getCell(8)).getNumberValue() != 0){
+									style.setFillForegroundColor ( HSSFColor.RED.index );
+		   							style.setFillPattern ( FillPatternType.SOLID_FOREGROUND );
+		   							row.getCell(8).setCellStyle(style);
+		   							row.getCell(8).getNumericCellValue()
+								}
+							}
+						}
+				}
+				fis.close();
+				FileOutputStream fos = new FileOutputStream(new File(excelFilePath))
+				wb.writeProtectWorkbook(password,"")
+				wb.write(fos);
+				wb.close();
+				fos.close()
+			}catch(Exception e){ return false;}
+		}
+
+		/**
+		*	writes the input list data to excel and returns execution status of the method.
+		*
+		*	@param excelFilePath	file path of the excel file to write.
+		*	@param sheetNameToWrite	name of the sheet to write.
+		*	@param dataLst			input data in 2-layer format.
+		*	@param hasHeader		set true if the input list contains header else false.
+		*	@return boolean			returns execution status of the method.
+		*	
+		*/
+		public boolean writeToExcel(String excelFilePath, String sheetNameToWrite, List dataLst, boolean hasHeader, String password){
+		
+			try{
+				FileInputStream fis = new FileInputStream(new File(excelFilePath));
+				Workbook wb = WorkbookFactory.create(fis,password);
+				Sheet sh = wb.getSheet(sheetNameToWrite);
+				
+				CellStyle styleHeader = wb.createCellStyle();
+				styleHeader.setBorderBottom(BorderStyle.THIN);
+				styleHeader.setBorderLeft(BorderStyle.THIN);
+				styleHeader.setBorderRight(BorderStyle.THIN);
+				styleHeader.setBorderTop(BorderStyle.THIN);
+				styleHeader.setAlignment(HorizontalAlignment.CENTER);
+				styleHeader.setFillForegroundColor(IndexedColors.INDIGO.getIndex());
+				
+				Font font = wb.createFont();
+		        font.setColor(HSSFColor.HSSFColorPredefined.WHITE.getIndex());
+		        styleHeader.setFont(font);
+		        
+				styleHeader.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+				
+				CellStyle style = wb.createCellStyle();
+				style.setBorderBottom(BorderStyle.THIN);
+				style.setBorderLeft(BorderStyle.THIN);
+				style.setBorderRight(BorderStyle.THIN);
+				style.setBorderTop(BorderStyle.THIN);
+				style.setAlignment(HorizontalAlignment.CENTER);
+				int headerRowNum = 1;
+				for(int rowNum = hasHeader?0:1; rowNum < dataLst.size(); rowNum++){
+					Row row = sh.createRow(rowNum);
+					List columnDataLst = dataLst[ hasHeader?rowNum:rowNum-1];
+					for(int columnNum = 0; columnNum < columnDataLst.size(); columnNum++){
+						Cell cell = row.createCell(columnNum);
+						
+						
+						if(columnDataLst[1] != ""){
+							cell.setCellStyle(styleHeader);
+							row.createCell(10).setCellStyle(styleHeader);
+							headerRowNum = (rowNum+1);
+							switch(columnNum){
+							
+							case 2:
+								cell.setCellFormula("COUNTIF(Balance!C:C,B"+(rowNum+1)+")");
+								break;
+							case 3:
+								cell.setCellFormula("VLOOKUP(B"+(rowNum+1)+",Balance!C:F,4,0)");
+								break;
+							case 4:
+								cell.setCellFormula("COUNTIF(Transaction!C:C,RECONCILIATION!B"+(rowNum+1)+")");
+								break;
+							case 5:
+								cell.setCellFormula("COUNTIF('S Order'!B:B,RECONCILIATION!B"+(rowNum+1)+")");
+								break;
+							default:
+								cell.setCellValue(columnDataLst[columnNum]);
+								break;
+							}
+						}else{
+							cell.setCellStyle(style);
+							row.createCell(10).setCellStyle(style);
+							if(columnNum == 8){
+								switch(columnDataLst[7]){
+								
+									case "TOTAL":
+										cell.setCellFormula("SUM(I"+(headerRowNum+1)+":I"+cell.getRowIndex()+")");
+										break;
+									case "BALANCE":
+										cell.setCellFormula("SUM(I"+(headerRowNum+1)+":I"+cell.getRowIndex()+")");
+										break;
+									case "FOS":
+										cell.setCellFormula("D"+headerRowNum);
+										break;
+									case "DIFF":
+										cell.setCellFormula("SUM(I"+(cell.getRowIndex()-1)+":I"+cell.getRowIndex()+")");
+										break;
+									default:
+										cell.setCellValue(columnDataLst[columnNum]);
+										break;
+								}
+							}else{
+								cell.setCellValue(columnDataLst[columnNum]);
+							}
+							
+						}
+						
+					}
+					
+				}
+				Row row_FOS = sh.createRow(dataLst.size());
+				Row row_DIFF = sh.createRow(dataLst.size()+1);
+				
+				for(int i = 0; i < 11; i++){
+					Cell cell_FOS = row_FOS.createCell(i);
+					cell_FOS.setCellStyle(style);
+					if(i == 8){
+						cell_FOS.setCellFormula("D"+headerRowNum);
+					}else if (i == 7){
+						cell_FOS.setCellValue("FOS");
+					}
+				}
+				
+				for(int i = 0; i < 11; i++){
+					Cell cell_DIFF = row_DIFF.createCell(i);
+					cell_DIFF.setCellStyle(style);
+					if(i == 8){
+						cell_DIFF.setCellFormula("SUM(I"+dataLst.size()+":I"+(dataLst.size()+1)+")");
+					}else if (i == 7){
+						cell_DIFF.setCellValue("DIFF");
+					}
+				}
+				
+				
+				fis.close();
+				FileOutputStream fos = new FileOutputStream(new File(excelFilePath));
+				
+				wb.write(fos);
+				wb.close();
+				fos.close();
+				return true
+			}catch(Exception e){
+				log.error("Error in writeToExcel method and the error message is : "+e.getMessage());
+				return false
+			}
+			
+		}
+	]]></script>
+    <export include-original-data="true"></export>
+
+</config>

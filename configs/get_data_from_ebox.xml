@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<config
+	xmlns="http://web-harvest.sourceforge.net/schema/1.0/config"
+	scriptlang="groovy">
+
+	<robotics-flow>
+		<robot driver="universal" close-on-completion="true" start-in-private="true">
+			<capability name="SEARCH_ALL_WINDOWS" value="true" />
+			<capability name="CLOSE_ALL_WINDOWS" value="true" />
+			<script><![CDATA[
+				import com.workfusion.studio.rpa.recorder.api.*
+				import com.workfusion.studio.rpa.recorder.api.types.*
+				import com.workfusion.studio.rpa.recorder.api.custom.*
+				import com.workfusion.studio.rpa.recorder.api.internal.representation.*
+
+				import com.workfusion.bot.exception.*
+				Iterator itrMap ;
+				Map recordsData = toMap(records.getWrappedObject().toString())
+				//recordsData.put(1234,"AIR ONE LIMITED");
+				if(recordsData != null){
+					itrMap = recordsData.entrySet().iterator();
+				}
+				
+				Map rmDataMap = new HashMap();
+				def web_address = "{{ebox_login_page}}"
+				def creds = "{{ebox_credentails_vault_name}}"
+				// get ebox credentails from secrect vault.
+				def ebox_uname = workfusion_bot_task_service_registry.get(SecretsVault.class).findEntry(creds).map({ it.getKey() }).map({ RString.of(it) }).orElseThrow({ new SecretsVaultException("Secret Entry with alias 'import_loan_extract_ebox_creds' not found") })
+				def ebox_pwd = workfusion_bot_task_service_registry.get(SecretsVault.class).findEntry(creds).map({ it.getValue() }).map({ RString.of(it) }).orElseThrow({ new SecretsVaultException("Secret Entry with alias 'import_loan_extract_ebox_creds' not found") })
+
+
+				com.workfusion.rpa.helpers.RPA.metaClass.static.$ = { Closure c -> c.call() } // Support for Expression action. Should be implemented in RPA class in next release.
+
+				// open ebox login page.
+				openChrome(UrlOperations.ensureProtocol("${web_address}"))
+
+				// login to ebox.
+				$(byXpath("/html/body/div[2]/form/table/tbody/tr/td[1]/table/tbody/tr[1]/td[2]/input[1]")).setValue(String.valueOf(ebox_uname))
+				$(byXpath("/html/body/div[2]/form/table/tbody/tr/td[1]/table/tbody/tr[2]/td[2]/input")).setValue(String.valueOf(ebox_pwd))
+				$(byXpath("/html/body/div[2]/form/div[2]/input")).click()
+
+				sleep(5000)
+
+				sleep(5000)
+				try{
+					$(byText("Customer Details")).click() // select customer details link
+				}catch(Exception e){
+					$(byXpath("/html/body/div[2]/div[28]/a")).click() // select customer details link
+				}
+				while(itrMap.hasNext() && $(byXpath("/html/body/div[2]/div[28]/a")).isExists() && (recordsData != null)){
+					sleep(2 * 1000)
+					Map.Entry entry = itrMap.next();
+					try{
+						$(byXpath("//*[@id=\"cbCustomerName\"]")).setValue(entry.getValue().toString()) // enter name in text field
+						$(byXpath("//*[@id=\"cbChangeCustomer\"]")).click()// select submit
+						sleep(2 * 1000)
+						boolean isExist = false;
+						try{
+							isExist = $(byXpath("/html/body/div[3]/p")).isExists()
+						}catch(Exception e){}
+						if(!isExist){
+							def temp = $(byXpath("//*[@id=\"referStream\"]")).getSelectedText()// $(byXpath("/html/body/div[3]/form/div[2]/div[3]/div[2]/table/tbody/tr[8]/td[2]/select"))
+							$(byXpath("//*[@id=\"cbClearCustomer\"]")).click()
+							rmDataMap.put(entry.getKey().toString(), Arrays.asList(entry.getValue().toString(),temp.split("-")[1]))
+						}else{
+							try{	
+								$(byXpath("/html/body/div[3]/form[1]/div/input")).click()
+							}catch(Exception e){
+							}
+						}
+					}catch(Exception e){
+						log.error("Error occured at name : "+entry.getVaule().toString() +" and the error message is : \n"+e.getMessage())
+					}
+				}
+
+				$(byXpath("/html/body/div[2]/div[3]/a")).click()
+				putAt("rm_data",rmDataMap)
+				
+				//========================= Method Declaration - START ====================
+				
+				public Map toMap(String str){
+					Map tempMap;
+					if(str.contains("=")){
+						tempMap = new HashMap();
+						for(String strTemp: str.replaceAll("[{|}|\\[|\\]]","").split(",")){
+							def lst = strTemp.split("=")
+							tempMap.put(lst[0].trim(),lst[1].trim())
+						}
+						return tempMap
+					}else{
+						return null;
+					}	
+				}
+			]]></script>
+		</robot>
+	</robotics-flow>
+	<export include-original-data="true">
+		<single-column name="rm_data" value="${rm_data}" />
+	</export>
+
+</config>
